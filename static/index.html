@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LeRobot Annotator</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div id="picker" class="view">
+    <div class="picker-inner">
+      <h1>LeRobot annotator</h1>
+      <p class="lede">
+        Choose a v2.1 dataset, then mark <code>instruction_segments</code> on synchronized camera frames.
+        Training reads these indices from <code>meta/info.json</code>.
+      </p>
+      <p id="picker-root" class="muted"></p>
+      <div id="dataset-list" class="dataset-list"></div>
+    </div>
+  </div>
+
+  <div id="workspace" class="view hidden">
+    <header class="topbar">
+      <button type="button" id="btn-back" class="btn ghost">Datasets</button>
+      <div class="topbar-title">
+        <strong id="ds-name"></strong>
+        <span id="ds-meta" class="muted"></span>
+      </div>
+      <label class="check">
+        <input type="checkbox" id="reviewed"> Reviewed
+      </label>
+      <span id="save-state" class="muted">saved</span>
+      <button type="button" id="btn-save" class="btn primary">Save to info.json</button>
+    </header>
+
+    <div class="layout">
+      <aside class="col episodes-col">
+        <div class="col-head">
+          <span>Episodes</span>
+          <span id="ep-progress" class="muted"></span>
+        </div>
+        <input type="search" id="ep-filter" placeholder="Filter index…" autocomplete="off">
+        <div id="episode-list" class="episode-list"></div>
+      </aside>
+
+      <section class="col stage">
+        <div id="cam-row" class="cam-row"></div>
+        <div id="frame-banner" class="banner hidden"></div>
+
+        <div class="transport">
+          <div class="transport-row">
+            <button type="button" id="btn-prev-ep" class="btn" title="Previous episode [">« Ep</button>
+            <button type="button" id="btn-jump-back" class="btn">−N</button>
+            <button type="button" id="btn-step-back" class="btn">−1</button>
+            <button type="button" id="btn-play" class="btn primary">Play</button>
+            <button type="button" id="btn-step-fwd" class="btn">+1</button>
+            <button type="button" id="btn-jump-fwd" class="btn">+N</button>
+            <button type="button" id="btn-next-ep" class="btn" title="Next episode ]">Ep »</button>
+            <div class="frame-readout">
+              <label>Frame
+                <input type="number" id="frame-input" min="0" step="1">
+              </label>
+              <span id="frame-of" class="mono"></span>
+              <span id="frame-time" class="muted mono"></span>
+            </div>
+            <label class="jump-label">Jump N
+              <input type="number" id="jump-input" min="1" max="300" value="5">
+            </label>
+            <div class="jump-presets">
+              <button type="button" class="btn tiny jump-preset" data-n="1">1</button>
+              <button type="button" class="btn tiny jump-preset" data-n="5">5</button>
+              <button type="button" class="btn tiny jump-preset" data-n="10">10</button>
+              <button type="button" class="btn tiny jump-preset" data-n="30">30</button>
+            </div>
+            <label class="rate-label">Rate
+              <select id="play-rate">
+                <option value="0.25">0.25×</option>
+                <option value="0.5">0.5×</option>
+                <option value="1" selected>1×</option>
+                <option value="2">2×</option>
+              </select>
+            </label>
+          </div>
+          <input type="range" id="frame-slider" min="0" max="0" value="0" step="1">
+        </div>
+
+        <div class="timeline-block">
+          <div class="timeline-legend">
+            <span><i class="swatch trained"></i> Sampler [start, success]</span>
+            <span><i class="swatch prompt"></i> Prompt only (after success)</span>
+            <span><i class="swatch idle"></i> Outside segments</span>
+            <span id="tl-hover" class="muted"></span>
+          </div>
+          <div id="timeline" class="timeline"></div>
+        </div>
+      </section>
+
+      <aside class="col inspector">
+        <section class="panel">
+          <h2>Task template</h2>
+          <p class="hint">
+            Same-task episodes share a default subtask count. Apply this template, then adjust bounds per episode.
+          </p>
+          <label>Segments
+            <input type="number" id="tpl-n" min="1" max="12" value="2">
+          </label>
+          <div id="tpl-instructions"></div>
+          <label>High-level instruction
+            <select id="tpl-hl-mode">
+              <option value="off">Off — model sees per-segment text</option>
+              <option value="concat">Concatenate subtasks (one prompt for the episode)</option>
+              <option value="custom">Custom string for every episode</option>
+            </select>
+          </label>
+          <textarea id="tpl-hl-custom" rows="2" placeholder="Custom high-level instruction" class="hidden"></textarea>
+          <div class="btn-row">
+            <button type="button" id="btn-apply-ep" class="btn">Apply to this episode</button>
+            <button type="button" id="btn-apply-instr" class="btn">Instructions only</button>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="btn-apply-unreviewed" class="btn">Apply to unreviewed</button>
+            <button type="button" id="btn-copy-prev" class="btn">Copy prev (scaled)</button>
+          </div>
+          <button type="button" id="btn-clear-hl" class="btn">Clear HL on all episodes</button>
+        </section>
+
+        <section class="panel">
+          <h2>This episode</h2>
+          <p id="ep-task" class="hint"></p>
+          <div class="btn-row">
+            <button type="button" id="btn-add-seg" class="btn">Add segment</button>
+            <button type="button" id="btn-del-seg" class="btn danger">Remove active</button>
+          </div>
+          <p class="hint">
+            End index is <strong>exclusive</strong> (last included frame = end − 1), matching
+            <code>frame &lt; end</code> in prompt lookup. Sampler trains
+            <code>[start, success]</code>.
+          </p>
+          <div id="seg-list"></div>
+          <label>High-level (this episode)
+            <textarea id="ep-hl" rows="2"></textarea>
+          </label>
+          <p id="hl-warn" class="warn hidden">
+            Non-empty HL replaces every subtask string at train time.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Mark current frame</h2>
+          <div class="btn-row">
+            <button type="button" id="btn-set-start" class="btn">Start here (S)</button>
+            <button type="button" id="btn-set-success" class="btn">Success here (X)</button>
+            <button type="button" id="btn-set-end" class="btn">End here (E)</button>
+          </div>
+          <p id="active-hint" class="hint"></p>
+        </section>
+
+        <section class="panel">
+          <h2>Health</h2>
+          <div id="health"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Keys</h2>
+          <ul class="keys">
+            <li><kbd>←</kbd><kbd>→</kbd> ±1 frame</li>
+            <li><kbd>Shift</kbd>+arrows ±N</li>
+            <li><kbd>Space</kbd> play / pause</li>
+            <li><kbd>[</kbd> <kbd>]</kbd> prev / next episode</li>
+            <li><kbd>1</kbd>–<kbd>9</kbd> select segment</li>
+            <li><kbd>S</kbd> <kbd>X</kbd> <kbd>E</kbd> start / success / end</li>
+            <li><kbd>Ctrl</kbd>+<kbd>S</kbd> save</li>
+            <li><kbd>Home</kbd> <kbd>End</kbd> first / last frame</li>
+          </ul>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
