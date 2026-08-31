@@ -28,6 +28,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 STATIC = HERE / "static"
 PROGRESS_NAME = "annotation_progress.json"
+BROKEN_NAME = "broken.json"
 
 PREFERRED_CAMERAS = [
     "observation.images.top_head",
@@ -317,6 +318,34 @@ def _progress_path(ds: Path) -> Path:
     return ds / "meta" / PROGRESS_NAME
 
 
+def _broken_path(ds: Path) -> Path:
+    return ds / BROKEN_NAME
+
+
+def _load_broken(ds: Path) -> list[int]:
+    path = _broken_path(ds)
+    if not path.is_file():
+        return []
+    try:
+        data = _read_json(path)
+        if isinstance(data, list):
+            return sorted({int(x) for x in data})
+    except Exception:
+        return []
+    return []
+
+
+def _save_broken(ds: Path, episodes: list[int]) -> list[int]:
+    cleaned = sorted({int(x) for x in episodes if int(x) >= 0})
+    path = _broken_path(ds)
+    tmp = path.with_suffix(".json.tmp")
+    with tmp.open("w", encoding="utf-8", newline="\n") as f:
+        json.dump(cleaned, f)
+        f.write("\n")
+    tmp.replace(path)
+    return cleaned
+
+
 def _load_progress(ds: Path) -> dict:
     path = _progress_path(ds)
     if path.is_file():
@@ -409,6 +438,11 @@ class SaveBody(BaseModel):
     instruction_segments: dict[str, list[dict]] = Field(default_factory=dict)
     high_level_instruction: dict[str, dict] = Field(default_factory=dict)
     progress: dict | None = None
+    broken: list[int] | None = None
+
+
+class BrokenBody(BaseModel):
+    episodes: list[int] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +469,7 @@ def api_list_datasets() -> dict:
         segs = info.get("instruction_segments") or {}
         n = int(info.get("total_episodes") or len(episodes) or 0)
         annotated = sum(1 for i in range(n) if segs.get(str(i)))
+        broken = _load_broken(ds)
         items.append(
             {
                 "name": name,
@@ -447,6 +482,7 @@ def api_list_datasets() -> dict:
                 "cameras": [c["key"] for c in _cameras(ds, info)],
                 "annotated_episodes": annotated,
                 "reviewed_episodes": sum(1 for i in range(n) if reviewed.get(str(i))),
+                "broken": broken,
             }
         )
     return {"root": str(ROOT), "datasets": items}
@@ -461,6 +497,8 @@ def api_dataset(name: str) -> dict:
     cameras = _cameras(ds, info)
     progress = _load_progress(ds)
     reviewed = progress.get("reviewed") or {}
+    broken = _load_broken(ds)
+    broken_set = set(broken)
     segs = info.get("instruction_segments") or {}
     hl = info.get("high_level_instruction") or {}
     ep_out = []
@@ -475,6 +513,7 @@ def api_dataset(name: str) -> dict:
                 "tasks": row.get("tasks") or [],
                 "n_segments": len(ep_segs) if isinstance(ep_segs, list) else 0,
                 "reviewed": bool(reviewed.get(key)),
+                "broken": idx in broken_set,
             }
         )
     return {
@@ -493,6 +532,7 @@ def api_dataset(name: str) -> dict:
         "high_level_instruction": hl,
         "health": _health(info, cameras),
         "progress": progress,
+        "broken": broken,
     }
 
 
@@ -645,12 +685,15 @@ def api_save(name: str, body: SaveBody) -> dict:
 
     if body.progress is not None:
         _save_progress(ds, body.progress)
+    if body.broken is not None:
+        _save_broken(ds, body.broken)
 
     return {
         "ok": True,
         "episodes_written": len(norm_segs),
         "warnings": warnings,
         "backup": str(info_path.with_suffix(".json.bak")),
+        "broken": _load_broken(ds),
     }
 
 
@@ -659,6 +702,13 @@ def api_progress(name: str, body: dict) -> dict:
     ds = _safe_dataset(name)
     _save_progress(ds, body)
     return {"ok": True}
+
+
+@app.post("/api/datasets/{name}/broken")
+def api_broken(name: str, body: BrokenBody) -> dict:
+    ds = _safe_dataset(name)
+    cleaned = _save_broken(ds, body.episodes)
+    return {"ok": True, "broken": cleaned}
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")

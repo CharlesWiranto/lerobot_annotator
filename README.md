@@ -48,6 +48,7 @@ If `high_level_instruction` is non-empty, training **replaces** every subtask st
 | `<dataset>/meta/info.json` | Updates `instruction_segments` and `high_level_instruction` only |
 | `<dataset>/meta/info.json.bak` | Copy of `info.json` from just before the last save |
 | `<dataset>/meta/annotation_progress.json` | Reviewed flags and the task template (not used by training) |
+| `<dataset>/broken.json` | Episode indices to skip; toggle **Broken** or press `B` (written immediately) |
 
 ## Keys
 

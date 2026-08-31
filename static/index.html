@@ -29,6 +29,9 @@
       <label class="check">
         <input type="checkbox" id="reviewed"> Reviewed
       </label>
+      <label class="check">
+        <input type="checkbox" id="broken"> Broken
+      </label>
       <span id="save-state" class="muted">saved</span>
       <button type="button" id="btn-save" class="btn primary">Save to info.json</button>
     </header>
@@ -45,6 +48,7 @@
 
       <section class="col stage">
         <div id="cam-row" class="cam-row"></div>
+        <div id="broken-banner" class="banner hidden">This episode is in broken.json — skip it for training.</div>
         <div id="frame-banner" class="banner hidden"></div>
 
         <div class="transport">
@@ -169,6 +173,7 @@
             <li><kbd>[</kbd> <kbd>]</kbd> prev / next episode</li>
             <li><kbd>1</kbd>–<kbd>9</kbd> select segment</li>
             <li><kbd>S</kbd> <kbd>X</kbd> <kbd>E</kbd> start / success / end</li>
+            <li><kbd>B</kbd> mark / unmark broken</li>
             <li><kbd>Ctrl</kbd>+<kbd>S</kbd> save</li>
             <li><kbd>Home</kbd> <kbd>End</kbd> first / last frame</li>
           </ul>

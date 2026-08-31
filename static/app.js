@@ -12,6 +12,7 @@ const state = {
   instruction_segments: {},
   high_level_instruction: {},
   progress: { reviewed: {}, template: null, last_episode: 0 },
+  broken: new Set(),
   episodeIndex: 0,
   frame: 0,
   jump: 5,
@@ -59,6 +60,14 @@ function epKey(i = state.episodeIndex) {
   return String(i);
 }
 
+function isBroken(i = state.episodeIndex) {
+  return state.broken.has(i);
+}
+
+function brokenList() {
+  return [...state.broken].sort((a, b) => a - b);
+}
+
 function segsOf(i = state.episodeIndex) {
   return state.instruction_segments[epKey(i)] || [];
 }
@@ -87,6 +96,29 @@ function templateState() {
     hl_mode: $("#tpl-hl-mode").value,
     hl_custom: $("#tpl-hl-custom").value,
   };
+}
+
+function persistBroken() {
+  return api(`/api/datasets/${encodeURIComponent(state.name)}/broken`, {
+    method: "POST",
+    body: JSON.stringify({ episodes: brokenList() }),
+  })
+    .then((res) => {
+      state.broken = new Set(res.broken || []);
+      renderEpisodeList();
+      renderHealth();
+    })
+    .catch((err) => toast("Could not write broken.json: " + err.message));
+}
+
+function setBroken(on) {
+  if (on) state.broken.add(state.episodeIndex);
+  else state.broken.delete(state.episodeIndex);
+  $("#broken").checked = on;
+  $("#broken-banner").classList.toggle("hidden", !on);
+  renderEpisodeList();
+  renderHealth();
+  persistBroken();
 }
 
 function persistProgressFields() {
@@ -421,14 +453,19 @@ function renderEpisodeList() {
     btn.className = "ep-item";
     if (ep.episode_index === state.episodeIndex) btn.classList.add("current");
     if (state.progress.reviewed?.[epKey(ep.episode_index)]) btn.classList.add("reviewed");
+    if (isBroken(ep.episode_index)) btn.classList.add("broken");
     const nseg = segsOf(ep.episode_index).length;
+    const marks = [];
+    if (isBroken(ep.episode_index)) marks.push("brk");
+    if (state.progress.reviewed?.[epKey(ep.episode_index)]) marks.push("rev");
+    else if (nseg) marks.push("·");
     btn.innerHTML = `<span class="idx">${ep.episode_index}</span>
       <span>${ep.length} f · ${nseg} seg</span>
-      <span class="mark">${state.progress.reviewed?.[epKey(ep.episode_index)] ? "rev" : nseg ? "·" : ""}</span>`;
+      <span class="mark">${marks.join(" ")}</span>`;
     btn.addEventListener("click", () => selectEpisode(ep.episode_index).catch((err) => toast(err.message)));
     box.appendChild(btn);
   }
-  $("#ep-progress").textContent = `${reviewed}/${state.episodes.length} rev`;
+  $("#ep-progress").textContent = `${reviewed}/${state.episodes.length} rev · ${state.broken.size} brk`;
 }
 
 function renderHealth() {
@@ -448,6 +485,11 @@ function renderHealth() {
   );
   bits.push(
     `<div class="${h.hl_overrides_subtasks ? "warn" : ""}">${h.high_level_instruction_count || 0} episodes have HL text (overrides subtask prompts)</div>`
+  );
+  bits.push(
+    `<div class="${state.broken.size ? "bad" : "ok"}">${state.broken.size} in broken.json${
+      state.broken.size ? " [" + brokenList().join(", ") + "]" : ""
+    }</div>`
   );
   $("#health").innerHTML = bits.join("");
 }
@@ -469,6 +511,8 @@ async function selectEpisode(idx) {
   $("#frame-slider").max = String(lastFrame());
   $("#frame-input").max = String(lastFrame());
   $("#reviewed").checked = Boolean(state.progress.reviewed?.[epKey(idx)]);
+  $("#broken").checked = isBroken(idx);
+  $("#broken-banner").classList.toggle("hidden", !isBroken(idx));
   $("#ep-task").textContent = (ep?.tasks || []).join(" / ") || "No task string in episodes.jsonl";
   try {
     const meta = await api(`/api/datasets/${encodeURIComponent(state.name)}/episodes/${idx}`);
@@ -658,6 +702,7 @@ async function save() {
         instruction_segments: state.instruction_segments,
         high_level_instruction: state.high_level_instruction,
         progress: state.progress,
+        broken: brokenList(),
       }),
     });
     markClean();
@@ -698,6 +743,7 @@ async function openDataset(name) {
   state.instruction_segments = data.instruction_segments || {};
   state.high_level_instruction = data.high_level_instruction || {};
   state.progress = Object.assign({ reviewed: {}, last_episode: 0 }, data.progress || {});
+  state.broken = new Set(data.broken || []);
   $("#cam-row").dataset.sig = "";
   fillTemplateFromDataset(data);
   renderWorkspaceChrome();
@@ -728,6 +774,7 @@ function bind() {
     markDirty();
     renderEpisodeList();
   });
+  $("#broken").addEventListener("change", () => setBroken($("#broken").checked));
   $("#ep-filter").addEventListener("input", renderEpisodeList);
   $("#btn-play").addEventListener("click", togglePlay);
   $("#btn-step-back").addEventListener("click", () => step(-1));
@@ -807,10 +854,12 @@ function bind() {
       "Apply template to every unreviewed episode?\n\n" +
       "This replaces their segments with an even split of the episode length.\n" +
       "First start = 0, last end = length.\n" +
+      "Broken episodes and already-reviewed ones are skipped.\n" +
       "HL mode is '" + templateState().hl_mode + "' (off clears high-level text so the model sees subtask instructions)."
     )) return;
     for (const ep of state.episodes) {
       if (state.progress.reviewed?.[epKey(ep.episode_index)]) continue;
+      if (isBroken(ep.episode_index)) continue;
       applyToEpisode(ep.episode_index);
     }
     renderSegments();
@@ -866,6 +915,8 @@ function bind() {
     } else if (e.key === "End") {
       e.preventDefault();
       setFrame(lastFrame());
+    } else if (e.key === "b" || e.key === "B") {
+      setBroken(!isBroken());
     } else if (e.key === "s" || e.key === "S") {
       markHere("start_frame_index");
     } else if (e.key === "x" || e.key === "X") {
@@ -907,6 +958,7 @@ function renderPicker(data) {
         <dt>fps</dt><dd>${ds.fps}</dd>
         <dt>cameras</dt><dd>${(ds.cameras || []).length}</dd>
         <dt>reviewed</dt><dd>${ds.reviewed_episodes}/${ds.total_episodes}</dd>
+        <dt>broken</dt><dd>${(ds.broken || []).length ? ds.broken.join(", ") : "none"}</dd>
         <dt>robot</dt><dd>${ds.robot_type || "—"} ${ds.codebase_version || ""}</dd>
       </dl>`;
     btn.addEventListener("click", () => openDataset(ds.name).catch((err) => toast(err.message)));

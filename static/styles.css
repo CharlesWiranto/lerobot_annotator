@@ -146,6 +146,7 @@ textarea { resize: vertical; min-height: 44px; }
 .ep-item .idx { font-family: var(--mono); color: var(--muted); }
 .ep-item .mark { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 .ep-item.reviewed .mark { color: var(--ok); }
+.ep-item.broken .mark { color: var(--danger); }
 .ep-item.dirty-ep .mark { color: var(--warn); }
 
 .stage {
